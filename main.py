@@ -20,7 +20,7 @@ BOT_TOKEN = os.environ.get("BOT_TOKEN", "8924603107:AAG82Gb6LIf0GfRgZF-fqW-ugr6z
 logging.basicConfig(format='%(asctime)s - %(levelname)s - %(message)s', level=logging.INFO)
 logger = logging.getLogger(__name__)
 
-# دالة لجلب توقيت السودان الدقيق (GMT+2) لتجنب توقيت السيرفرات الأجنبية
+# دالة التوقيت المحلي للسودان (GMT+2)
 def get_sudan_time():
     utc_now = datetime.utcnow()
     sudan_time = utc_now + timedelta(hours=2)
@@ -33,7 +33,7 @@ class HealthCheckHandler(BaseHTTPRequestHandler):
     def do_GET(self):
         self.send_response(200)
         self.end_headers()
-        self.wfile.write(b"Ministry of Defense - Operations Room is Active")
+        self.wfile.write(b"Sudan MoD & Military Command Radar 24/7 is Active")
 
 def run_health_server():
     port = int(os.environ.get("PORT", 10000))
@@ -54,7 +54,7 @@ def fetch_rss(url):
     return feedparser.parse("")
 
 # ============================================
-# 🗄️ إدارة قواعد البيانات (مع حماية ضد التلف)
+# 🗄️ إدارة قواعد البيانات
 # ============================================
 class DataManager:
     def __init__(self, filename="radar_data.json"):
@@ -78,7 +78,6 @@ class DataManager:
 
     def save_data(self):
         try:
-            # الحفظ الآمن لمنع تلف الملف
             temp_file = self.filename + ".tmp"
             with open(temp_file, 'w', encoding='utf-8') as f:
                 json.dump(self.data, f, ensure_ascii=False, indent=2)
@@ -96,16 +95,36 @@ class DataManager:
             self.save_data()
 
 # ============================================
-# 🔍 محرك الرصد الدقيق
+# 🔍 محرك رصد (وزارة الدفاع والقيادة العسكرية حصراً)
 # ============================================
 class RadarEngine:
     def __init__(self, dm):
         self.dm = dm
         
+        # 🎯 الكلمات المفتاحية المخصصة حصراً للقائمة المطلوبة فقط
         self.exact_keywords = [
-            "وزير الدفاع السوداني", "وزارة الدفاع السودانية", "يس إبراهيم", "حسن داؤود كبرون", "حسن كبرون",
-            "عبدالفتاح البرهان", "عبد الفتاح البرهان", "البرهان", "شمس الدين كباشي", "ياسر العطا", "إبراهيم جابر", 
-            "القوات المسلحة السودانية", "الجيش السوداني", "القيادة العامة للجيش", "الناطق الرسمي باسم القوات المسلحة"
+            # 1. وزارة الدفاع ووزير الدفاع
+            "وزير الدفاع السوداني", "وزارة الدفاع السودانية", "وزير دفاع السودان", "وزير الدفاع المكلف", 
+            "وزير الدفاع", "وزارة الدفاع", "حسن داؤود كبرون", "حسن داوود كبرون", "حسن كبرون", 
+            "الفريق حسن داؤود", "يس إبراهيم يس", "يس إبراهيم",
+            
+            # 2. القائد العام - عبد الفتاح البرهان
+            "عبد الفتاح البرهان", "عبدالفتاح البرهان", "البرهان",
+            
+            # 3. القائد شمس الدين كباشي
+            "شمس الدين كباشي", "الكباشي", "كباشي",
+            
+            # 4. القائد ياسر العطا
+            "ياسر العطا", "العطا",
+            
+            # 5. رئاسة القوات المسلحة ورئاسة الجيش
+            "القوات المسلحة السودانية", "الجيش السوداني", "القيادة العامة للجيش", 
+            "القيادة العامة للقوات المسلحة", "رئاسة القوات المسلحة", "هيئة الأركان", 
+            "الناطق الرسمي باسم القوات المسلحة",
+            
+            # English Equivalents for global media
+            "Sudan Defense Minister", "Sudan Ministry of Defense", "Abdel Fattah al-Burhan", 
+            "Yasser al-Atta", "Shams el-Din Kabbashi", "Sudanese Army", "SAF Sudan"
         ]
 
         self.direct_sources = {
@@ -119,9 +138,14 @@ class RadarEngine:
             "صحيفة التغيير": "https://www.altagheer.info/ar/feed/"
         }
 
+        # استعلامات مسح مركزة حصراً على هذه الشخصيات والجهات
         self.google_queries = [
-            '"وزير الدفاع السوداني"', '"وزارة الدفاع السودانية"', '"يس إبراهيم"', '"حسن داؤود كبرون"',
-            '"عبد الفتاح البرهان"', '"ياسر العطا"', '"الجيش السوداني"'
+            '"وزير الدفاع السوداني"',
+            '"وزارة الدفاع السودانية"',
+            '"عبد الفتاح البرهان"',
+            '"شمس الدين كباشي"',
+            '"ياسر العطا"',
+            '"القيادة العامة للقوات المسلحة" OR "الجيش السوداني"'
         ]
 
     def scan_all(self):
@@ -140,14 +164,13 @@ class RadarEngine:
             feed = fetch_rss(google_url)
             for entry in feed.entries[:5]:
                 self.dm.data["stats"]["articles_scanned"] += 1
-                art = self._analyze_entry(entry, "رصد المحرك الدولي (Google)")
+                art = self._analyze_entry(entry, "رصد صحافة العالم (Google)")
                 if art: found_articles.append(art)
 
         self.dm.save_data()
         return found_articles
 
     def _analyze_entry(self, entry, source_name):
-        # تنظيف الرابط من الشوائب لمنع التكرار
         raw_link = entry.get('link', '')
         clean_link = raw_link.split('?')[0] if '?' in raw_link else raw_link
         
@@ -177,7 +200,7 @@ class RadarEngine:
         return None
 
 # ============================================
-# 🤖 أوامر البوت ولوحة التحكم
+# 🤖 لوحة التحكم ورصد قيادة الدفاع والجيش
 # ============================================
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user = update.effective_user
@@ -185,34 +208,37 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     dm.add_sub(update.effective_chat.id, user.first_name)
 
     msg = f"""
-🦅 **وزارة الدفاع - غرفة العمليات الإعلامية** 🇸🇩
-🔐 `[نظام مؤمن - خاص بمنسوبي الوزارة]`
+🦅 **رادار وزارة الدفاع وقيادة القوات المسلحة** 🇸🇩
+🔐 `[نظام رصد مخصص ومغلق]`
 
 سعادة / **{user.first_name}** المحترم، 
-تم تسجيل دخولكم لمحطة الرصد. يقوم هذا الرادار بمسح دوري للصحافة المحلية والعالمية لالتقاط أي محتوى يخص القيادة العامة والقوات المسلحة.
+تم تفعيل الرصد المباشر والحصري لـ:
+1. **وزارة الدفاع ووزير الدفاع**.
+2. **الفريق أول ركن عبد الفتاح البرهان**.
+3. **الفريق أول ركن شمس الدين كباشي**.
+4. **الفريق أول ركن ياسر العطا**.
+5. **رئاسة القوات المسلحة والقيادة العامة للجيش**.
 
-**[ مهام وحدة التحكم ]**
-الرجاء اختيار الأداة المطلوبة من اللوحة أدناه:
+سيتم إرسال أي خبر أو بيان أو تصريح يخص هذه الجهات فوراً إلى حسابكم.
 """
     keyboard = [
-        [InlineKeyboardButton("📝 إصدار موجز صحفي للقيادة", callback_data="press_briefing")],
-        [InlineKeyboardButton("🗂️ رصد القيادة ووزير الدفاع", callback_data="command_news")],
-        [InlineKeyboardButton("🌍 الإعلام الخارجي", callback_data="global_media"), InlineKeyboardButton("🇸🇩 الإعلام الداخلي", callback_data="local_media")],
-        [InlineKeyboardButton("⚙️ حالة النظام والإحصائيات", callback_data="system_status"), InlineKeyboardButton("🎯 بنك الأهداف", callback_data="show_keywords")]
+        [InlineKeyboardButton("📝 موجز أحدث أخبار القيادة والدفاع", callback_data="command_briefing")],
+        [InlineKeyboardButton("🏛️ أخبار وزارة الدفاع والجيش", callback_data="mod_news")],
+        [InlineKeyboardButton("⚙️ حالة الرادار والإحصائيات", callback_data="system_status"), InlineKeyboardButton("🎯 القادة والجهات المراقبة", callback_data="show_keywords")]
     ]
     await update.message.reply_text(msg, parse_mode='Markdown', reply_markup=InlineKeyboardMarkup(keyboard))
 
 async def stop_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     dm = context.bot_data['dm']
     dm.remove_sub(update.effective_chat.id)
-    await update.message.reply_text("🛑 **تم إخلاء الطرف:** تم إيقاف الإشعارات وإزالة حسابكم من قاعدة بيانات الرصد بنجاح.", parse_mode='Markdown')
+    await update.message.reply_text("🛑 تم إيقاف الإشعارات وإزالة حسابكم من قاعدة البيانات.", parse_mode='Markdown')
 
 async def search_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not context.args:
-        await update.message.reply_text("🔍 **أداة البحث الاستخباري:**\nالرجاء كتابة كلمة للبحث عنها، مثال:\n`/search الفاشر`", parse_mode='Markdown')
+        await update.message.reply_text("🔍 **أداة البحث المباشر:**\nاكتب اسم قائد أو جهة للبحث، مثال:\n`/search ياسر العطا`", parse_mode='Markdown')
         return
     query_text = " ".join(context.args)
-    await update.message.reply_text(f"⏳ جاري إجراء مسح ميداني عن: **{query_text}**...")
+    await update.message.reply_text(f"⏳ جاري إجراء مسح عن: **{query_text}**...")
     
     encoded = urllib.parse.quote(query_text)
     url = f"https://news.google.com/rss/search?q={encoded}&hl=ar&gl=SD&ceid=SD:ar"
@@ -231,34 +257,23 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     dm = context.bot_data['dm']
     radar = context.bot_data['radar']
 
-    if query.data == "press_briefing":
-        await query.message.reply_text("⏳ جاري تجميع الموجز الصحفي الآلي...")
-        feed = await asyncio.to_thread(fetch_rss, "https://news.google.com/rss/search?q=%D8%A7%D9%84%D8%AC%D9%8A%D8%B4+%D8%A7%D9%84%D8%B3%D9%88%D8%AF%D8%A7%D9%86%D9%8A+OR+%D9%88%D8%B2%D9%8A%D8%B1+%D8%A7%D9%84%D8%AF%D9%81%D8%A7%D8%B9&hl=ar&gl=SD&ceid=SD:ar")
+    if query.data == "command_briefing":
+        await query.message.reply_text("⏳ جاري استخراج الموجز الخاص بالقيادة العليا والدفاع...")
+        encoded = urllib.parse.quote('"وزير الدفاع السوداني" OR "عبد الفتاح البرهان" OR "ياسر العطا" OR "شمس الدين كباشي"')
+        feed = await asyncio.to_thread(fetch_rss, f"https://news.google.com/rss/search?q={encoded}&hl=ar&gl=SD&ceid=SD:ar")
         res = [f"{i}. {e.title}\n🔗 [المصدر]({e.link})" for i, e in enumerate(feed.entries[:5], 1)]
-        briefing = f"📑 **موجز الرصد الإعلامي (جاهز للرفع):**\n\n" + "\n\n".join(res) + f"\n\n🕒 `إعداد آلي - توقيت السودان: {get_sudan_time()}`"
+        briefing = f"📑 **موجز رصد القيادة العامة ووزارة الدفاع:**\n\n" + "\n\n".join(res) + f"\n\n🕒 `توقيت السودان: {get_sudan_time()}`"
         await query.message.reply_text(briefing, parse_mode='Markdown', disable_web_page_preview=True)
 
-    elif query.data == "command_news":
-        await query.message.reply_text("⏳ جاري سحب أرشيف القيادة ووزير الدفاع...")
-        encoded = urllib.parse.quote('"وزير الدفاع السوداني" OR "عبد الفتاح البرهان"')
+    elif query.data == "mod_news":
+        await query.message.reply_text("⏳ جاري سحب أحدث بيانات القوات المسلحة ووزارة الدفاع...")
+        encoded = urllib.parse.quote('"وزارة الدفاع السودانية" OR "القيادة العامة للقوات المسلحة"')
         feed = await asyncio.to_thread(fetch_rss, f"https://news.google.com/rss/search?q={encoded}&hl=ar&gl=SD&ceid=SD:ar")
         res = [f"📌 **{e.title}**\n🔗 [رابط]({e.link})" for e in feed.entries[:4]]
         if res:
-            await query.message.reply_text("🗂️ **تصريحات وأخبار القيادة العليا:**\n\n" + "\n\n".join(res), parse_mode='Markdown', disable_web_page_preview=True)
+            await query.message.reply_text("🏛️ **أخبار وبيانات القوات المسلحة ووزارة الدفاع:**\n\n" + "\n\n".join(res), parse_mode='Markdown', disable_web_page_preview=True)
         else:
-            await query.message.reply_text("لم يتم رصد أخبار حديثة للقيادة.")
-
-    elif query.data == "global_media":
-        await query.message.reply_text("⏳ جاري فحص الوكالات الخارجية...")
-        feed = await asyncio.to_thread(fetch_rss, radar.direct_sources["الجزيرة"])
-        res = [f"🌍 **{e.title}**\n🔗 [رابط]({e.link})" for e in feed.entries[:4]]
-        await query.message.reply_text("🌍 **رصد الإعلام الخارجي:**\n\n" + "\n\n".join(res), parse_mode='Markdown', disable_web_page_preview=True)
-
-    elif query.data == "local_media":
-        await query.message.reply_text("⏳ جاري فحص الإذاعات والصحف الداخلية...")
-        feed = await asyncio.to_thread(fetch_rss, radar.direct_sources["سودان تربيون"])
-        res = [f"🇸🇩 **{e.title}**\n🔗 [رابط]({e.link})" for e in feed.entries[:4]]
-        await query.message.reply_text("🇸🇩 **رصد الإعلام الداخلي:**\n\n" + "\n\n".join(res), parse_mode='Markdown', disable_web_page_preview=True)
+            await query.message.reply_text("لم يتم رصد بيانات حديثة.")
 
     elif query.data == "system_status":
         scanned = dm.data["stats"]["articles_scanned"]
@@ -266,15 +281,15 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
         uptime = dm.data["stats"]["start_time"]
         subs = len(dm.data["subscribers"])
         
-        stat_msg = f"⚙️ **التقرير الفني لغرفة العمليات:**\n\n👥 **الضباط/المشتركين:** `{subs}`\n🔍 **حجم البيانات الممسوحة:** `{scanned}` مقال.\n🚨 **الإنذارات الصادرة:** `{alerts}` تنبيه.\n⏱️ **تاريخ بدء السيرفر:** `{uptime}`\n🟢 **حالة النظام:** اتصال آمن، قاعدة البيانات محمية."
+        stat_msg = f"⚙️ **تقرير نظام الرصد العسكري:**\n\n👥 **المستقبلين:** `{subs}`\n🔍 **المقالات المفحوصة:** `{scanned}` مقال.\n🚨 **الإشعارات الصادرة:** `{alerts}` تنبيه.\n⏱️ **بداية التفعيل:** `{uptime}`\n🟢 **الحالة:** تركيز حاد على وزارة الدفاع وقادة الجيش."
         await query.message.reply_text(stat_msg, parse_mode='Markdown')
 
     elif query.data == "show_keywords":
         kws = "\n".join([f"🎯 `{kw}`" for kw in radar.exact_keywords])
-        await query.message.reply_text(f"📋 **بنك الأهداف (الكلمات المراقبة آلياً):**\n\n{kws}", parse_mode='Markdown')
+        await query.message.reply_text(f"📋 **الجهات والشخصيات المراقبة حصراً:**\n\n{kws}", parse_mode='Markdown')
 
 # ============================================
-# 🔄 حلقة الرصد التلقائي الخلفية (الرادار)
+# 🔄 حلقة الرصد التلقائي الخلفية
 # ============================================
 async def radar_loop(app: Application):
     await asyncio.sleep(5)
@@ -288,15 +303,13 @@ async def radar_loop(app: Application):
                 for art in articles:
                     dm.data["stats"]["alerts_sent"] += 1
                     dm.save_data()
-                    msg = f"🚨 **[ إشعار أمني - عاجل ]** 🇸🇩\n\n📌 **العنوان:** {art['title']}\n📰 **الجهة الناشرة:** {art['source']}\n🎯 **الهدف المرصود:** `{art['keyword']}`\n⏰ **توقيت السودان:** {art['time']}\n\n🔗 [انقر هنا للتحقق من المصدر]({art['link']})"
+                    msg = f"🚨 **[ رصد عاجل - قيادة الدفاع والجيش ]** 🇸🇩\n\n📌 **العنوان:** {art['title']}\n📰 **الجهة الناشرة:** {art['source']}\n🎯 **الهدف المرصود:** `{art['keyword']}`\n⏰ **توقيت السودان:** {art['time']}\n\n🔗 [انقر هنا للتفاصيل والمصدر]({art['link']})"
                     
-                    # إرسال بحذر لتنظيف الحسابات المغلقة
                     for chat_id in list(dm.data["subscribers"].keys()):
                         try:
                             await app.bot.send_message(chat_id=int(chat_id), text=msg, parse_mode='Markdown', disable_web_page_preview=True)
                             await asyncio.sleep(0.1)
                         except (Forbidden, BadRequest):
-                            # إذا قام المستخدم بحظر البوت، يتم مسحه آلياً لحماية السيرفر
                             dm.remove_sub(chat_id)
                         except Exception:
                             pass
@@ -325,7 +338,7 @@ def main():
     app.add_handler(CommandHandler("search", search_command))
     app.add_handler(CallbackQueryHandler(button_handler))
 
-    logger.info("✅ غرفة العمليات الإعلامية تعمل الآن بكفاءة...")
+    logger.info("✅ رادار وزارة الدفاع وقيادة الجيش يعمل الآن...")
     app.run_polling(drop_pending_updates=True)
 
 if __name__ == "__main__":
