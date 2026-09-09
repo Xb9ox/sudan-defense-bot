@@ -1,113 +1,146 @@
 import os
 import logging
 import threading
-from http.server import HTTPServer, BaseHTTPRequestHandler
+import time
 import asyncio
 import feedparser
-import urllib.request
+import requests
+from http.server import HTTPServer, BaseHTTPRequestHandler
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.ext import ApplicationBuilder, CommandHandler, CallbackQueryHandler, ContextTypes
 
-# 1. إعدادات السجل
+# --- 1. إعدادات السجلات للتحقق من الأخطاء ---
 logging.basicConfig(
     format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
     level=logging.INFO
 )
+logger = logging.getLogger(__name__)
 
-# 2. سيرفر الويب لإبقاء Render شغال 24/7
-class SimpleHTTPRequestHandler(BaseHTTPRequestHandler):
+# --- 2. سيرفر الويب (ضروري جداً لمنع توقف Render) ---
+class HealthCheckHandler(BaseHTTPRequestHandler):
     def do_GET(self):
         self.send_response(200)
         self.end_headers()
-        self.wfile.write(b"Bot is Running Successfully!")
+        self.wfile.write(b"Bot is alive and running!")
 
 def run_web_server():
     port = int(os.environ.get("PORT", 10000))
-    server = HTTPServer(('0.0.0.0', port), SimpleHTTPRequestHandler)
-    print(f"🌐 Web Server alive on port {port}")
+    server = HTTPServer(('0.0.0.0', port), HealthCheckHandler)
+    logger.info(f"✅ Web Server started on port {port}")
     server.serve_forever()
 
+# تشغيل السيرفر في خيط منفصل فوراً
 threading.Thread(target=run_web_server, daemon=True).start()
 
-# 3. توكن البوت الخاص بك
+# --- 3. بيانات البوت والمصادر ---
 TOKEN = "8924603107:AAG82Gb6LIf0GfRgZF-fqW-ugr6zQcbXvkA"
 
-# 4. مصادر الأخبار السودانية والعالمية
-NEWS_FEEDS = {
-    "sudan_dabanga": {"name": "📻 راديو دبنقا", "url": "https://www.dabangasudan.org/ar/feed"},
-    "sudan_altagheer": {"name": "📰 صحيفة التغيير السودانية", "url": "https://www.altagheer.info/ar/feed/"},
+NEWS_SOURCES = {
+    "dabanga": {"name": "📻 راديو دبنقا (السودان)", "url": "https://www.dabangasudan.org/ar/feed"},
+    "tagheer": {"name": "📰 صحيفة التغيير", "url": "https://www.altagheer.info/ar/feed/"},
     "sudan_tribune": {"name": "🗞️ سودان تربيون", "url": "https://sudantribune.net/feed/"},
-    "sudan_aj": {"name": "🌍 الجزيرة - السودان", "url": "https://www.aljazeera.net/aljazeerarss/a7c18667-7117-4555-9130-031986811977/73d0e1b4-532f-45ef-b135-bfd3d2cf09c8"},
-    "global_bbcarabic": {"name": "🌐 BBC العربي", "url": "http://feeds.bbci.co.uk/arabic/rss.xml"},
-    "global_sky": {"name": "📺 سكاي نيوز عربية", "url": "https://www.skynewsarabia.com/rss.xml"}
+    "aj_sudan": {"name": "🌍 الجزيرة سودان", "url": "https://www.aljazeera.net/aljazeerarss/a7c18667-7117-4555-9130-031986811977/73d0e1b4-532f-45ef-b135-bfd3d2cf09c8"},
+    "bbc_arabic": {"name": "🌐 BBC العربية", "url": "http://feeds.bbci.co.uk/arabic/rss.xml"},
+    "skynews": {"name": "📺 سكاي نيوز", "url": "https://www.skynewsarabia.com/rss.xml"}
 }
 
-def fetch_news(rss_url):
+# دالة جلب الأخبار المعدلة (تستخدم Requests لتفادي الحظر)
+def get_news(url):
     try:
-        req = urllib.request.Request(
-            rss_url, 
-            headers={'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64)'}
-        )
-        html = urllib.request.urlopen(req, timeout=10).read()
-        feed = feedparser.parse(html)
+        headers = {'User-Agent': 'Mozilla/5.0'}
+        response = requests.get(url, headers=headers, timeout=15)
+        feed = feedparser.parse(response.content)
         
-        results = []
-        for entry in feed.entries[:5]: 
-            title = entry.get('title', 'بدون عنوان')
-            link = entry.get('link', '#')
-            results.append(f"🔹 **[{title}]({link})**")
+        if not feed.entries:
+            return "❌ لا توجد أخبار متاحة الآن من هذا المصدر."
             
-        return "\n\n".join(results) if results else "❌ لا توجد أخبار حالياً."
+        news_list = []
+        for entry in feed.entries[:5]: # آخر 5 أخبار
+            title = entry.title
+            link = entry.link
+            news_list.append(f"🔹 **{title}**\n🔗 [إقرأ المزيد]({link})")
+        
+        return "\n\n".join(news_list)
     except Exception as e:
-        return "⚠️ المصدر لا يستجيب حالياً، حاول لاحقاً."
+        logger.error(f"Error fetching news: {e}")
+        return "⚠️ حدث خطأ أثناء جلب الأخبار. حاول مرة أخرى."
 
-# 5. الأوامر
+# --- 4. أوامر البوت ---
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     keyboard = [
-        [InlineKeyboardButton("🇸🇩 أخبار السودان", callback_data="menu_sudan")],
-        [InlineKeyboardButton("🌍 صحافة عالمية", callback_data="menu_global")],
-        [InlineKeyboardButton("⚡ عاجل الآن", callback_data="latest_all")]
+        [InlineKeyboardButton("🇸🇩 أخبار السودان المحلية", callback_data="sudan_news")],
+        [InlineKeyboardButton("🌍 الصحافة العالمية", callback_data="global_news")],
+        [InlineKeyboardButton("⚡ عاجل الآن", callback_data="fast_news")]
     ]
     await update.message.reply_text(
-        "مرحباً بك في بوت أخبار السودان والعالم 🇸🇩🌍\nاختر القسم:",
+        "مرحباً بك في بوت أخبار السودان والعالم 🇸🇩🌍\nاختر القسم المطلوب:",
         reply_markup=InlineKeyboardMarkup(keyboard)
     )
 
-async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
+async def handle_buttons(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
     await query.answer()
     
-    if query.data == "menu_sudan":
-        keyboard = [
-            [InlineKeyboardButton("📻 راديو دبنقا", callback_data="feed_sudan_dabanga")],
-            [InlineKeyboardButton("📰 صحيفة التغيير", callback_data="feed_sudan_altagheer")],
-            [InlineKeyboardButton("🗞️ سودان تربيون", callback_data="feed_sudan_tribune")],
-            [InlineKeyboardButton("🔙 رجوع", callback_data="back_main")]
+    if query.data == "sudan_news":
+        keys = [
+            [InlineKeyboardButton("راديو دبنقا", callback_data="fetch_dabanga")],
+            [InlineKeyboardButton("صحيفة التغيير", callback_data="fetch_tagheer")],
+            [InlineKeyboardButton("سودان تربيون", callback_data="fetch_sudan_tribune")],
+            [InlineKeyboardButton("🔙 رجوع", callback_data="main_menu")]
         ]
-        await query.edit_message_text("🇸🇩 **مصادر السودان:**", reply_markup=InlineKeyboardMarkup(keyboard), parse_mode="Markdown")
+        await query.edit_message_text("🇸🇩 اختر المصدر السوداني:", reply_markup=InlineKeyboardMarkup(keys))
 
-    elif query.data == "menu_global":
-        keyboard = [
-            [InlineKeyboardButton("🌐 BBC عربية", callback_data="feed_global_bbcarabic")],
-            [InlineKeyboardButton("📺 سكاي نيوز", callback_data="feed_global_sky")],
-            [InlineKeyboardButton("🔙 رجوع", callback_data="back_main")]
+    elif query.data == "global_news":
+        keys = [
+            [InlineKeyboardButton("BBC العربية", callback_data="fetch_bbc_arabic")],
+            [InlineKeyboardButton("سكاي نيوز", callback_data="fetch_skynews")],
+            [InlineKeyboardButton("🔙 رجوع", callback_data="main_menu")]
         ]
-        await query.edit_message_text("🌍 **مصادر عالمية:**", reply_markup=InlineKeyboardMarkup(keyboard), parse_mode="Markdown")
+        await query.edit_message_text("🌍 اختر المصدر العالمي:", reply_markup=InlineKeyboardMarkup(keys))
 
-    elif query.data == "back_main":
-        keyboard = [[InlineKeyboardButton("🇸🇩 أخبار السودان", callback_data="menu_sudan")], [InlineKeyboardButton("🌍 صحافة عالمية", callback_data="menu_global")]]
-        await query.edit_message_text("اختر القسم:", reply_markup=InlineKeyboardMarkup(keyboard))
+    elif query.data == "main_menu":
+        keyboard = [
+            [InlineKeyboardButton("🇸🇩 أخبار السودان المحلية", callback_data="sudan_news")],
+            [InlineKeyboardButton("🌍 الصحافة العالمية", callback_data="global_news")]
+        ]
+        await query.edit_message_text("اختر القسم المطلوب:", reply_markup=InlineKeyboardMarkup(keyboard))
 
-    elif query.data.startswith("feed_"):
-        feed_key = query.data.replace("feed_", "")
-        source = NEWS_FEEDS[feed_key]
-        await query.edit_message_text(f"⏳ جاري جلب الأخبار من {source['name']}...")
-        news_text = await asyncio.to_thread(fetch_news, source['url'])
-        keyboard = [[InlineKeyboardButton("🔙 رجوع", callback_data="back_main")]]
-        await query.edit_message_text(f"📰 **{source['name']}:**\n\n{news_text}", reply_markup=InlineKeyboardMarkup(keyboard), parse_mode="Markdown", disable_web_page_preview=True)
-
-    elif query.data == "latest_all":
-        await query.edit_message_text("⏳ جاري جلب آخر الأحداث...")
-        news_text = await asyncio.to_thread(fetch_news, NEWS_FEEDS["sudan_dabanga"]["url"])
-        keyboard = [[InlineKeyboardButton("🔙 رجوع", callback_data="back_main")]]
+    elif query.data.startswith("fetch_"):
+        source_key = query.data.replace("fetch_", "")
+        source = NEWS_SOURCES.get(source_key)
         
+        await query.edit_message_text(f"⏳ جاري جلب آخر الأخبار من {source['name']}...")
+        
+        # تنفيذ جلب الأخبار في خيط منفصل لعدم تجميد البوت
+        loop = asyncio.get_event_loop()
+        news_content = await loop.run_in_executor(None, get_news, source['url'])
+        
+        back_key = [[InlineKeyboardButton("🔙 العودة للقائمة", callback_data="main_menu")]]
+        await query.edit_message_text(
+            f"📰 **{source['name']}**:\n\n{news_content}",
+            reply_markup=InlineKeyboardMarkup(back_key),
+            parse_mode="Markdown",
+            disable_web_page_preview=True
+        )
+
+    elif query.data == "fast_news":
+        await query.edit_message_text("⚡ جاري جلب أهم الأنباء السودانية العاجلة...")
+        news_content = await asyncio.get_event_loop().run_in_executor(None, get_news, NEWS_SOURCES['aj_sudan']['url'])
+        await query.edit_message_text(f"⚡ **عاجل السودان:**\n\n{news_content}", parse_mode="Markdown", disable_web_page_preview=True)
+
+# --- 5. تشغيل التطبيق ---
+def main():
+    try:
+        # بناء التطبيق بدون استخدام JobQueue بشكل مباشر لحل مشكلة NoneType
+        app = ApplicationBuilder().token(TOKEN).build()
+
+        app.add_handler(CommandHandler("start", start))
+        app.add_handler(CallbackQueryHandler(handle_buttons))
+
+        logger.info("🚀 Bot is starting polling...")
+        app.run_polling(drop_pending_updates=True)
+    except Exception as e:
+        logger.error(f"💥 Fatal Error: {e}")
+
+if __name__ == "__main__":
+    main()
