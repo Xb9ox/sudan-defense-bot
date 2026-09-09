@@ -3,6 +3,7 @@ import json
 import logging
 import asyncio
 import threading
+import time
 import requests
 from http.server import HTTPServer, BaseHTTPRequestHandler
 from datetime import datetime, timedelta
@@ -20,25 +21,38 @@ BOT_TOKEN = os.environ.get("BOT_TOKEN", "8924603107:AAG82Gb6LIf0GfRgZF-fqW-ugr6z
 logging.basicConfig(format='%(asctime)s - %(levelname)s - %(message)s', level=logging.INFO)
 logger = logging.getLogger(__name__)
 
-# دالة التوقيت المحلي للسودان (GMT+2)
 def get_sudan_time():
     utc_now = datetime.utcnow()
     sudan_time = utc_now + timedelta(hours=2)
     return sudan_time.strftime('%Y-%m-%d %H:%M:%S')
 
 # ============================================
-# 🌐 خادم لمنع إيقاف السيرفر (Render Keep-Alive)
+# 🌐 خادم الويب ومنع النوم تلقائياً (Anti-Sleep)
 # ============================================
 class HealthCheckHandler(BaseHTTPRequestHandler):
     def do_GET(self):
         self.send_response(200)
         self.end_headers()
-        self.wfile.write(b"Sudan MoD & Military Command Radar 24/7 is Active")
+        self.wfile.write(b"Sudan MoD & Armed Forces Radar 24/7 is Active")
 
 def run_health_server():
     port = int(os.environ.get("PORT", 10000))
     server = HTTPServer(('0.0.0.0', port), HealthCheckHandler)
     server.serve_forever()
+
+def self_ping_loop():
+    time.sleep(15)
+    render_url = os.environ.get("RENDER_EXTERNAL_URL")
+    
+    while True:
+        try:
+            if render_url:
+                response = requests.get(render_url, timeout=10)
+                logger.info(f"⏰ Self-ping status: {response.status_code}")
+        except Exception as e:
+            logger.error(f"Self-ping error: {e}")
+        
+        time.sleep(240) # إرسال منبه كل 4 دقائق
 
 # ============================================
 # 📡 دالة جلب الأخبار وتجاوز الحظر
@@ -95,36 +109,33 @@ class DataManager:
             self.save_data()
 
 # ============================================
-# 🔍 محرك رصد (وزارة الدفاع والقيادة العسكرية حصراً)
+# 🔍 محرك رصد (القوات المسلحة ووزارة الدفاع السودانية حصراً)
 # ============================================
 class RadarEngine:
     def __init__(self, dm):
         self.dm = dm
         
-        # 🎯 الكلمات المفتاحية المخصصة حصراً للقائمة المطلوبة فقط
+        # 🎯 بنك كلمات مفلتر بصرامة لعدم جلب أخبار أي دولة أخرى
         self.exact_keywords = [
-            # 1. وزارة الدفاع ووزير الدفاع
-            "وزير الدفاع السوداني", "وزارة الدفاع السودانية", "وزير دفاع السودان", "وزير الدفاع المكلف", 
-            "وزير الدفاع", "وزارة الدفاع", "حسن داؤود كبرون", "حسن داوود كبرون", "حسن كبرون", 
-            "الفريق حسن داؤود", "يس إبراهيم يس", "يس إبراهيم",
+            # 1. وزارة الدفاع السودانية ووزير الدفاع السوداني
+            "وزير الدفاع السوداني", "وزارة الدفاع السودانية", "وزير دفاع السودان", "وزير الدفاع السوداني المكلف",
+            "حسن داؤود كبرون", "حسن داوود كبرون", "حسن كبرون", "الفريق حسن داؤود", "يس إبراهيم يس", "يس إبراهيم",
             
-            # 2. القائد العام - عبد الفتاح البرهان
+            # 2. القائد العام ورئاسة القوات المسلحة السودانية
             "عبد الفتاح البرهان", "عبدالفتاح البرهان", "البرهان",
             
-            # 3. القائد شمس الدين كباشي
-            "شمس الدين كباشي", "الكباشي", "كباشي",
-            
-            # 4. القائد ياسر العطا
+            # 3. أعضاء القيادة العسكرية السودانية
+            "شمس الدين كباشي", "الكباشي", "كباشي", 
             "ياسر العطا", "العطا",
             
-            # 5. رئاسة القوات المسلحة ورئاسة الجيش
-            "القوات المسلحة السودانية", "الجيش السوداني", "القيادة العامة للجيش", 
-            "القيادة العامة للقوات المسلحة", "رئاسة القوات المسلحة", "هيئة الأركان", 
-            "الناطق الرسمي باسم القوات المسلحة",
+            # 4. القوات المسلحة والجيش (مربوطة بالسودان حصراً)
+            "القوات المسلحة السودانية", "الجيش السوداني", "القيادة العامة للجيش السوداني", 
+            "القيادة العامة للقوات المسلحة السودانية", "رئاسة القوات المسلحة السودانية", 
+            "هيئة الأركان السودانية", "الناطق الرسمي باسم القوات المسلحة السودانية",
             
-            # English Equivalents for global media
-            "Sudan Defense Minister", "Sudan Ministry of Defense", "Abdel Fattah al-Burhan", 
-            "Yasser al-Atta", "Shams el-Din Kabbashi", "Sudanese Army", "SAF Sudan"
+            # 5. مصطلحات بالإنجليزية محددة للسودان فقط
+            "Sudan Defense Minister", "Sudan Ministry of Defense", "Sudanese Armed Forces", 
+            "Sudanese Army", "Abdel Fattah al-Burhan", "Yasser al-Atta", "Shams el-Din Kabbashi", "SAF Sudan"
         ]
 
         self.direct_sources = {
@@ -138,14 +149,15 @@ class RadarEngine:
             "صحيفة التغيير": "https://www.altagheer.info/ar/feed/"
         }
 
-        # استعلامات مسح مركزة حصراً على هذه الشخصيات والجهات
+        # استعلامات بحث جوجل المفلترة بدقة عالية للسودان فقط
         self.google_queries = [
             '"وزير الدفاع السوداني"',
             '"وزارة الدفاع السودانية"',
             '"عبد الفتاح البرهان"',
             '"شمس الدين كباشي"',
             '"ياسر العطا"',
-            '"القيادة العامة للقوات المسلحة" OR "الجيش السوداني"'
+            '"القوات المسلحة السودانية"',
+            '"الجيش السوداني"'
         ]
 
     def scan_all(self):
@@ -200,7 +212,7 @@ class RadarEngine:
         return None
 
 # ============================================
-# 🤖 لوحة التحكم ورصد قيادة الدفاع والجيش
+# 🤖 لوحة التحكم والرصد العسكري السوداني
 # ============================================
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user = update.effective_user
@@ -208,23 +220,23 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     dm.add_sub(update.effective_chat.id, user.first_name)
 
     msg = f"""
-🦅 **رادار وزارة الدفاع وقيادة القوات المسلحة** 🇸🇩
+🦅 **رادار وزارة الدفاع والقوات المسلحة السودانية** 🇸🇩
 🔐 `[نظام رصد مخصص ومغلق]`
 
 سعادة / **{user.first_name}** المحترم، 
 تم تفعيل الرصد المباشر والحصري لـ:
-1. **وزارة الدفاع ووزير الدفاع**.
+1. **وزارة الدفاع السودانية ووزير الدفاع السوداني**.
 2. **الفريق أول ركن عبد الفتاح البرهان**.
 3. **الفريق أول ركن شمس الدين كباشي**.
 4. **الفريق أول ركن ياسر العطا**.
-5. **رئاسة القوات المسلحة والقيادة العامة للجيش**.
+5. **القيادة العامة للقوات المسلحة السودانية**.
 
-سيتم إرسال أي خبر أو بيان أو تصريح يخص هذه الجهات فوراً إلى حسابكم.
+لن تصلكم إلا الأخبار والبيانات المحددة والمخصصة للسودان حصراً.
 """
     keyboard = [
-        [InlineKeyboardButton("📝 موجز أحدث أخبار القيادة والدفاع", callback_data="command_briefing")],
-        [InlineKeyboardButton("🏛️ أخبار وزارة الدفاع والجيش", callback_data="mod_news")],
-        [InlineKeyboardButton("⚙️ حالة الرادار والإحصائيات", callback_data="system_status"), InlineKeyboardButton("🎯 القادة والجهات المراقبة", callback_data="show_keywords")]
+        [InlineKeyboardButton("📝 موجز أحدث أخبار قيادة الجيش السوداني", callback_data="command_briefing")],
+        [InlineKeyboardButton("🏛️ أخبار وبيانات القوات المسلحة السودانية", callback_data="mod_news")],
+        [InlineKeyboardButton("⚙️ حالة الرادار والإحصائيات", callback_data="system_status"), InlineKeyboardButton("🎯 الأهداف المراقبة", callback_data="show_keywords")]
     ]
     await update.message.reply_text(msg, parse_mode='Markdown', reply_markup=InlineKeyboardMarkup(keyboard))
 
@@ -235,12 +247,14 @@ async def stop_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 async def search_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not context.args:
-        await update.message.reply_text("🔍 **أداة البحث المباشر:**\nاكتب اسم قائد أو جهة للبحث، مثال:\n`/search ياسر العطا`", parse_mode='Markdown')
+        await update.message.reply_text("🔍 **أداة البحث المباشر:**\nاكتب اسم قائد أو جهة للبحث، مثال:\n`/search البرهان`", parse_mode='Markdown')
         return
     query_text = " ".join(context.args)
+    # إضافة كلمة "السودان" لضمان عدم جلب نتائج دول أخرى في البحث اليدوي
+    full_search = f"{query_text} السودان"
     await update.message.reply_text(f"⏳ جاري إجراء مسح عن: **{query_text}**...")
     
-    encoded = urllib.parse.quote(query_text)
+    encoded = urllib.parse.quote(full_search)
     url = f"https://news.google.com/rss/search?q={encoded}&hl=ar&gl=SD&ceid=SD:ar"
     feed = await asyncio.to_thread(fetch_rss, url)
     
@@ -258,20 +272,20 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     radar = context.bot_data['radar']
 
     if query.data == "command_briefing":
-        await query.message.reply_text("⏳ جاري استخراج الموجز الخاص بالقيادة العليا والدفاع...")
+        await query.message.reply_text("⏳ جاري استخراج الموجز الخاص بالقيادة العامة ووزير الدفاع السوداني...")
         encoded = urllib.parse.quote('"وزير الدفاع السوداني" OR "عبد الفتاح البرهان" OR "ياسر العطا" OR "شمس الدين كباشي"')
         feed = await asyncio.to_thread(fetch_rss, f"https://news.google.com/rss/search?q={encoded}&hl=ar&gl=SD&ceid=SD:ar")
         res = [f"{i}. {e.title}\n🔗 [المصدر]({e.link})" for i, e in enumerate(feed.entries[:5], 1)]
-        briefing = f"📑 **موجز رصد القيادة العامة ووزارة الدفاع:**\n\n" + "\n\n".join(res) + f"\n\n🕒 `توقيت السودان: {get_sudan_time()}`"
+        briefing = f"📑 **موجز رصد القيادة والقوات المسلحة السودانية:**\n\n" + "\n\n".join(res) + f"\n\n🕒 `توقيت السودان: {get_sudan_time()}`"
         await query.message.reply_text(briefing, parse_mode='Markdown', disable_web_page_preview=True)
 
     elif query.data == "mod_news":
-        await query.message.reply_text("⏳ جاري سحب أحدث بيانات القوات المسلحة ووزارة الدفاع...")
-        encoded = urllib.parse.quote('"وزارة الدفاع السودانية" OR "القيادة العامة للقوات المسلحة"')
+        await query.message.reply_text("⏳ جاري سحب أحدث بيانات القوات المسلحة السودانية ووزارة الدفاع...")
+        encoded = urllib.parse.quote('"وزارة الدفاع السودانية" OR "القيادة العامة للقوات المسلحة السودانية" OR "الناطق الرسمي باسم القوات المسلحة السودانية"')
         feed = await asyncio.to_thread(fetch_rss, f"https://news.google.com/rss/search?q={encoded}&hl=ar&gl=SD&ceid=SD:ar")
         res = [f"📌 **{e.title}**\n🔗 [رابط]({e.link})" for e in feed.entries[:4]]
         if res:
-            await query.message.reply_text("🏛️ **أخبار وبيانات القوات المسلحة ووزارة الدفاع:**\n\n" + "\n\n".join(res), parse_mode='Markdown', disable_web_page_preview=True)
+            await query.message.reply_text("🏛️ **أخبار وبيانات القوات المسلحة السودانية ووزارة الدفاع:**\n\n" + "\n\n".join(res), parse_mode='Markdown', disable_web_page_preview=True)
         else:
             await query.message.reply_text("لم يتم رصد بيانات حديثة.")
 
@@ -281,7 +295,7 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
         uptime = dm.data["stats"]["start_time"]
         subs = len(dm.data["subscribers"])
         
-        stat_msg = f"⚙️ **تقرير نظام الرصد العسكري:**\n\n👥 **المستقبلين:** `{subs}`\n🔍 **المقالات المفحوصة:** `{scanned}` مقال.\n🚨 **الإشعارات الصادرة:** `{alerts}` تنبيه.\n⏱️ **بداية التفعيل:** `{uptime}`\n🟢 **الحالة:** تركيز حاد على وزارة الدفاع وقادة الجيش."
+        stat_msg = f"⚙️ **تقرير نظام الرصد العسكري السوداني:**\n\n👥 **المستقبلين:** `{subs}`\n🔍 **المقالات المفحوصة:** `{scanned}` مقال.\n🚨 **الإشعارات الصادرة:** `{alerts}` تنبيه.\n⏱️ **بداية التفعيل:** `{uptime}`\n🟢 **الحالة:** فلترة صارمة ومخصصة للسودان 100%."
         await query.message.reply_text(stat_msg, parse_mode='Markdown')
 
     elif query.data == "show_keywords":
@@ -303,7 +317,7 @@ async def radar_loop(app: Application):
                 for art in articles:
                     dm.data["stats"]["alerts_sent"] += 1
                     dm.save_data()
-                    msg = f"🚨 **[ رصد عاجل - قيادة الدفاع والجيش ]** 🇸🇩\n\n📌 **العنوان:** {art['title']}\n📰 **الجهة الناشرة:** {art['source']}\n🎯 **الهدف المرصود:** `{art['keyword']}`\n⏰ **توقيت السودان:** {art['time']}\n\n🔗 [انقر هنا للتفاصيل والمصدر]({art['link']})"
+                    msg = f"🚨 **[ رصد عاجل - القوات المسلحة السودانية ]** 🇸🇩\n\n📌 **العنوان:** {art['title']}\n📰 **الجهة الناشرة:** {art['source']}\n🎯 **الهدف المرصود:** `{art['keyword']}`\n⏰ **توقيت السودان:** {art['time']}\n\n🔗 [انقر هنا للتفاصيل والمصدر]({art['link']})"
                     
                     for chat_id in list(dm.data["subscribers"].keys()):
                         try:
@@ -326,6 +340,8 @@ async def post_init(application: Application):
 # ============================================
 def main():
     threading.Thread(target=run_health_server, daemon=True).start()
+    threading.Thread(target=self_ping_loop, daemon=True).start()
+
     dm = DataManager()
     radar = RadarEngine(dm)
     app = Application.builder().token(BOT_TOKEN).post_init(post_init).build()
@@ -338,7 +354,7 @@ def main():
     app.add_handler(CommandHandler("search", search_command))
     app.add_handler(CallbackQueryHandler(button_handler))
 
-    logger.info("✅ رادار وزارة الدفاع وقيادة الجيش يعمل الآن...")
+    logger.info("✅ رادار القوات المسلحة السودانية ووزارة الدفاع يعمل الآن...")
     app.run_polling(drop_pending_updates=True)
 
 if __name__ == "__main__":
